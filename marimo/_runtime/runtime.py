@@ -193,6 +193,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
     from types import ModuleType
 
+    from marimo._messaging.agents import AgentConnection
     from marimo._plugins.ui._core.ui_element import UIElement
     from marimo._runtime.virtual_file import VirtualFileStorageType
 
@@ -593,6 +594,7 @@ class Kernel:
         ]
 
         self.router = RequestRouter()
+        self.agent_messaging: AgentConnection | None = None
         KernelRequestHandlers(self).register(self.router)
         for cb in self._callbacks:
             cb.register(self.router)
@@ -3101,6 +3103,7 @@ def launch_kernel(
     is_ipc: bool = False,
     parent_pid: int | None = None,
     config_overrides: tuple[ConfigPath, ...] = (),
+    agent_messaging: AgentConnection | None = None,
 ) -> None:
     from marimo._runtime.kernel_lifecycle import (
         KernelArgs,
@@ -3142,6 +3145,7 @@ def launch_kernel(
                 control_queue=control_queue,
                 set_ui_element_queue=set_ui_element_queue,
                 virtual_file_storage=virtual_file_storage,
+                agent_messaging=agent_messaging,
             )
         ) as (kernel, _ctx):
             if is_edit_mode:
