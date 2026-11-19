@@ -8,6 +8,7 @@ from math import isfinite
 from typing import TYPE_CHECKING
 
 from marimo._core import protocol, protocol_events
+from marimo._core.errors import MarimoBugError
 from marimo._core.stream import RoutedEvent, removal, snapshot_event
 
 if TYPE_CHECKING:
@@ -105,7 +106,9 @@ class RunLog:
                     entry.live.discard(execution_id)
                     entry.scratch.pop(execution_id, None)
                     if event.run_id is None:
-                        raise RuntimeError("Completed execution has no run ID")
+                        raise MarimoBugError(
+                            "Completed execution has no run ID"
+                        )
                     return self._close(event.run_id)
         return []
 
@@ -115,7 +118,7 @@ class RunLog:
         if entry is None:
             return None
         if not isinstance(entry.event.event, protocol.RunEvent):
-            raise RuntimeError("Expected a run event")
+            raise MarimoBugError("Expected a run event")
         return entry.event.event.data.run
 
     def input(self, input_id: str) -> protocol.Input | None:
@@ -192,7 +195,7 @@ class RunLog:
                     output.event,
                     (protocol.ConsoleEvent, protocol.DisplayEvent),
                 ):
-                    raise RuntimeError("Expected a console or display event")
+                    raise MarimoBugError("Expected a console or display event")
                 body = protocol_events.body(output.event)
                 events.append(self._removal(entry, type(body), body.id))
             events.append(
@@ -231,10 +234,10 @@ class RunLog:
 
     def _snapshot_event(self, event: RoutedEvent, entry: _Run) -> RoutedEvent:
         if not isinstance(event.event, protocol_events.RecordEvent):
-            raise RuntimeError("Expected a record event")
+            raise MarimoBugError("Expected a record event")
         body = protocol_events.body(event.event)
         if not isinstance(body, protocol_events.SnapshotBody):
-            raise RuntimeError("Expected a snapshot body")
+            raise MarimoBugError("Expected a snapshot body")
         return snapshot_event(
             body,
             request_id=(
