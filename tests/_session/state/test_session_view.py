@@ -172,6 +172,7 @@ def test_clear_hides_only_closed_inputs_until_execution_replaced(
     hint = session_view.cleared_console_inputs(cell_id, "first")
     assert hint is not None
     assert hint.input_ids == ["password"]
+    assert hint in session_view.snapshot_notifications(scope="editor")
     assert hint not in session_view.snapshot_notifications(scope="host")
     assert [
         entry.input_id
@@ -188,6 +189,7 @@ def test_clear_hides_only_closed_inputs_until_execution_replaced(
         ExecutionNotification("second", cell_id, "run", "planned")
     )
     assert session_view.cleared_console_inputs(cell_id, "first") is None
+    assert hint not in session_view.snapshot_notifications(scope="editor")
 
 
 def test_session_view_serialization_hint_survives_status_updates(
