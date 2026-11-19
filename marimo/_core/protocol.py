@@ -114,6 +114,16 @@ class CellInput(Struct, frozen=True, forbid_unknown_fields=True):
     ) = "_"
 
 
+class CellsOrigin(Struct, frozen=True, tag_field="kind", tag="cells"):
+    cell_ids: Annotated[
+        tuple[CellId, ...],
+        Meta(
+            description="The cells the run was requested for. Fixed when the run is accepted, so a client can tell which cells a queued run will reach before the runtime has planned their executions. Each one's execution in this run reports the fingerprint of the source accepted for it.",
+            min_length=1,
+        ),
+    ]
+
+
 if TYPE_CHECKING:
     CodeFingerprint = NewType("CodeFingerprint", str)
 else:
@@ -127,6 +137,10 @@ else:
             ),
         ],
     )
+
+
+class CodeOrigin(Struct, frozen=True, tag_field="kind", tag="code"):
+    pass
 
 
 class ConflictProblem(
@@ -593,6 +607,10 @@ else:
             ),
         ],
     )
+
+
+class RuntimeOrigin(Struct, frozen=True, tag_field="kind", tag="runtime"):
+    pass
 
 
 RuntimeStatus: TypeAlias = Annotated[
@@ -1506,73 +1524,12 @@ class RemovedMessage(Struct, frozen=True):
     ) = UNSET
 
 
-class Run(Struct, frozen=True):
-    cells: Annotated[
-        tuple[CellId, ...],
-        Meta(
-            description="The cells the run was requested for. Fixed when the run is accepted, so a client can tell which cells a queued run will reach before the runtime has planned their executions. Each one's execution in this run reports the fingerprint of the source accepted for it. Empty for scratch code and for a run the runtime scheduled itself."
-        ),
-    ]
-    completed_at: (
-        Annotated[
-            Timestamp,
-            Meta(
-                description="When the run ended. Null until the run is `completed`."
-            ),
-        ]
-        | None
-    )
-    id: RunId
-    notebook_id: NotebookId
-    outcome: (
-        Annotated[
-            RunOutcome,
-            Meta(
-                description="Null until completed, then final. Published with the terminal status and completed_at. An execution failure does not complete a run while other work remains. Interruption must have taken effect, not merely been requested."
-            ),
-        ]
-        | None
-    )
-    runtime_id: Annotated[
-        RuntimeId, Meta(description="The runtime that produced this run.")
-    ]
-    started_at: (
-        Annotated[
-            Timestamp,
-            Meta(
-                description="When the first execution started. Null if none has started."
-            ),
-        ]
-        | None
-    )
-    status: Annotated[
-        Lifecycle,
-        Meta(
-            description="Queued until the first execution starts, running until the cycle has settled or been terminated, and completed once all member executions are terminal and no more can be scheduled in this run. A run can complete with no executions."
-        ),
-    ]
-
-
-class RunMessage(Struct, frozen=True):
-    run: Run
-    request_id: (
-        Annotated[
-            str,
-            Meta(
-                description="The `Idempotency-Key` of the request that caused this event. Omitted when no request did, and on snapshots unless that request's work is still in progress."
-            ),
-        ]
-        | UnsetType
-    ) = UNSET
-    time: (
-        Annotated[
-            Timestamp,
-            Meta(
-                description="When the host made this change. Present on live and replayed events; omitted on snapshots."
-            ),
-        ]
-        | UnsetType
-    ) = UNSET
+RunOrigin: TypeAlias = Annotated[
+    CellsOrigin | CodeOrigin | RuntimeOrigin,
+    Meta(
+        description="What a run was given when it was created, tagged on `kind`. A\n`cells` run was given the cells in `cell_ids`. A `code` run was\ngiven code to evaluate, which its scratch execution carries. A\n`runtime` run was given neither. The runtime scheduled it in\nresponse to a change, such as the cells that read a UI element\nafter its value changes. Other kinds are defined by later versions\nof this protocol.\n"
+    ),
+]
 
 
 class RunRemovedEvent(
@@ -2098,14 +2055,64 @@ class ProjectRemovedEvent(
     ) = UNSET
 
 
-class RunEvent(Struct, frozen=True, tag_field="event", tag="run"):
-    data: RunMessage
-    id: (
+class Run(Struct, frozen=True):
+    completed_at: (
+        Annotated[
+            Timestamp,
+            Meta(
+                description="When the run ended. Null until the run is `completed`."
+            ),
+        ]
+        | None
+    )
+    id: RunId
+    notebook_id: NotebookId
+    origin: RunOrigin
+    outcome: (
+        Annotated[
+            RunOutcome,
+            Meta(
+                description="Null until completed, then final. Published with the terminal status and completed_at. An execution failure does not complete a run while other work remains. Interruption must have taken effect, not merely been requested."
+            ),
+        ]
+        | None
+    )
+    runtime_id: Annotated[
+        RuntimeId, Meta(description="The runtime that produced this run.")
+    ]
+    started_at: (
+        Annotated[
+            Timestamp,
+            Meta(
+                description="When the first execution started. Null if none has started."
+            ),
+        ]
+        | None
+    )
+    status: Annotated[
+        Lifecycle,
+        Meta(
+            description="Queued until the first execution starts, running until the cycle has settled or been terminated, and completed once all member executions are terminal and no more can be scheduled in this run. A run can complete with no executions."
+        ),
+    ]
+
+
+class RunMessage(Struct, frozen=True):
+    run: Run
+    request_id: (
         Annotated[
             str,
             Meta(
-                description="The resume cursor. Omitted on snapshot and reset events.",
-                min_length=1,
+                description="The `Idempotency-Key` of the request that caused this event. Omitted when no request did, and on snapshots unless that request's work is still in progress."
+            ),
+        ]
+        | UnsetType
+    ) = UNSET
+    time: (
+        Annotated[
+            Timestamp,
+            Meta(
+                description="When the host made this change. Present on live and replayed events; omitted on snapshots."
             ),
         ]
         | UnsetType
@@ -2166,6 +2173,20 @@ class AnalysisMessage(Struct, frozen=True):
 
 class ExecutionEvent(Struct, frozen=True, tag_field="event", tag="execution"):
     data: ExecutionMessage
+    id: (
+        Annotated[
+            str,
+            Meta(
+                description="The resume cursor. Omitted on snapshot and reset events.",
+                min_length=1,
+            ),
+        ]
+        | UnsetType
+    ) = UNSET
+
+
+class RunEvent(Struct, frozen=True, tag_field="event", tag="run"):
+    data: RunMessage
     id: (
         Annotated[
             str,

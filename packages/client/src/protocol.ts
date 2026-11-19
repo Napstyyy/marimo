@@ -589,6 +589,42 @@ export const RunId = zod
 export type RunId = zod.input<typeof RunId>;
 export type RunIdOutput = zod.output<typeof RunId>;
 
+export const CellsOrigin = zod.object({
+  kind: zod.enum(["cells"]),
+  cell_ids: zod
+    .array(CellId)
+    .min(1)
+    .describe(
+      "The cells the run was requested for. Fixed when the run is accepted, so a client can tell which cells a queued run will reach before the runtime has planned their executions. Each one's execution in this run reports the fingerprint of the source accepted for it.",
+    ),
+});
+
+export type CellsOrigin = zod.input<typeof CellsOrigin>;
+export type CellsOriginOutput = zod.output<typeof CellsOrigin>;
+
+export const CodeOrigin = zod.object({
+  kind: zod.enum(["code"]),
+});
+
+export type CodeOrigin = zod.input<typeof CodeOrigin>;
+export type CodeOriginOutput = zod.output<typeof CodeOrigin>;
+
+export const RuntimeOrigin = zod.object({
+  kind: zod.enum(["runtime"]),
+});
+
+export type RuntimeOrigin = zod.input<typeof RuntimeOrigin>;
+export type RuntimeOriginOutput = zod.output<typeof RuntimeOrigin>;
+
+export const RunOrigin = zod
+  .union([CellsOrigin, CodeOrigin, RuntimeOrigin])
+  .describe(
+    "What a run was given when it was created, tagged on `kind`. A\n`cells` run was given the cells in `cell_ids`. A `code` run was\ngiven code to evaluate, which its scratch execution carries. A\n`runtime` run was given neither. The runtime scheduled it in\nresponse to a change, such as the cells that read a UI element\nafter its value changes. Other kinds are defined by later versions\nof this protocol.\n",
+  );
+
+export type RunOrigin = zod.input<typeof RunOrigin>;
+export type RunOriginOutput = zod.output<typeof RunOrigin>;
+
 export const Lifecycle = zod
   .enum(["queued", "running", "completed"])
   .describe(
@@ -612,11 +648,7 @@ export const Run = zod
     id: RunId,
     notebook_id: NotebookId,
     runtime_id: RuntimeId.describe("The runtime that produced this run."),
-    cells: zod
-      .array(CellId)
-      .describe(
-        "The cells the run was requested for. Fixed when the run is accepted, so a client can tell which cells a queued run will reach before the runtime has planned their executions. Each one's execution in this run reports the fingerprint of the source accepted for it. Empty for scratch code and for a run the runtime scheduled itself.",
-      ),
+    origin: RunOrigin,
     status: Lifecycle.describe(
       "Queued until the first execution starts, running until the cycle has settled or been terminated, and completed once all member executions are terminal and no more can be scheduled in this run. A run can complete with no executions.",
     ),
