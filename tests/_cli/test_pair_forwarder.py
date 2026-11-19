@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
+import msgspec
 import pytest
 from click.testing import CliRunner
 
@@ -26,9 +27,21 @@ from marimo._cli.pair.client import (
     StaleNotebookError,
 )
 from marimo._cli.pair.connection import ConnectionStore, connection_identity
-from marimo._cli.pair.delivery import DeliveryTarget, ProcessHandle
+from marimo._cli.pair.delivery import (
+    DeliveryTarget,
+    ProcessHandle,
+    Submission,
+)
 from marimo._cli.pair.forwarder import ForwarderConfig, run_forwarder
 from marimo._cli.pair.target import ExecutionTarget
+from marimo._messaging.agents import (
+    ATTACHMENT_HEADER,
+    MESSAGE_TYPE,
+    REPORT_KEY_HEADER,
+    MessageContent,
+    PointerEvent,
+    SubmissionReport,
+)
 from tests._cli.test_pair_delivery import record
 
 if TYPE_CHECKING:
@@ -254,6 +267,125 @@ def test_dead_harness_never_connects(
     inbox.living = False
     run_forwarder(config, inbox, ready=Mock())
     calls.assert_not_called()
+
+
+def test_server_without_messaging_fails_startup(
+    config: ForwarderConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stream = SimpleNamespace(
+        response=SimpleNamespace(getheader=lambda _name: None), close=Mock()
+    )
+    monkeypatch.setattr(forwarder, "open_events", lambda **_kwargs: stream)
+    ready = Mock()
+    with pytest.raises(PairError):
+        run_forwarder(config, RecordingInbox(), ready=ready)
+    ready.assert_not_called()
+    stream.close.assert_called()
+
+
+def pointer(attempt_id: str) -> PointerEvent:
+    return PointerEvent(attempt_id, attempt_id, "att-one", "identity", None)
+
+
+def test_slow_submission_does_not_delay_the_next_fetch(
+    config: ForwarderConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    second_fetched = threading.Event()
+    fetched: list[str] = []
+    stream = SimpleNamespace(
+        response=SimpleNamespace(
+            getheader={
+                ATTACHMENT_HEADER: "att-one",
+                REPORT_KEY_HEADER: "key",
+            }.get
+        ),
+        close=Mock(),
+    )
+
+    def read(
+        _config: object,
+        incoming: queue.Queue[SSEEvent | Exception | None],
+        _stopped: threading.Event,
+        responses: list[object],
+        _cursor: str | None = None,
+    ) -> None:
+        responses.append(stream)
+        incoming.put(attached())
+        for attempt_id in ("one", "two"):
+            data = msgspec.to_builtins(pointer(attempt_id))
+            incoming.put(
+                SSEEvent(
+                    "custom",
+                    json.dumps(
+                        {"custom": {"type": MESSAGE_TYPE, "data": data}}
+                    ),
+                )
+            )
+        incoming.put(
+            SSEEvent("attachment.removed", json.dumps({"id": "att-one"}))
+        )
+
+    def fetch(
+        _config: object, pointer: PointerEvent, _key: str
+    ) -> MessageContent:
+        fetched.append(pointer.attempt_id)
+        if len(fetched) == 2:
+            second_fetched.set()
+        return MessageContent(pointer.attempt_id, "nb.py", None)
+
+    class SlowInbox(RecordingInbox):
+        def __init__(self) -> None:
+            super().__init__()
+            self.waits: list[bool] = []
+
+        def send(self, text: str) -> Submission:
+            self.waits.append(second_fetched.wait(timeout=5))
+            super().send(text)
+            return Submission("submitted")
+
+    reports = Mock()
+    monkeypatch.setattr(forwarder, "_read_stream", read)
+    monkeypatch.setattr(forwarder, "_fetch", fetch)
+    monkeypatch.setattr(forwarder, "open_response", reports)
+    inbox = SlowInbox()
+    run_forwarder(config, inbox, ready=Mock())
+
+    assert fetched == ["one", "two"]
+    assert inbox.waits == [True, True]
+    assert [text.rsplit("\n", 1)[-1] for text in inbox.messages] == [
+        "one",
+        "two",
+    ]
+    assert [
+        msgspec.json.decode(
+            call.kwargs["body"], type=SubmissionReport
+        ).attempt_id
+        for call in reports.call_args_list
+    ] == ["one", "two"]
+
+
+def test_preparation_failure_is_rejected(
+    config: ForwarderConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        forwarder, "inbox_message", Mock(side_effect=OSError("disk full"))
+    )
+    reports = Mock()
+    monkeypatch.setattr(forwarder, "open_response", reports)
+    inbox = RecordingInbox()
+    forwarder._submit(
+        config,
+        inbox,
+        pointer("one"),
+        "key",
+        MessageContent("text", "nb.py", None),
+        Mock(),
+    )
+    report = msgspec.json.decode(
+        reports.call_args.kwargs["body"], type=SubmissionReport
+    )
+    assert (report.status, report.reason) == ("rejected", "failed")
+    assert inbox.messages == []
 
 
 def test_detached_platform_options(monkeypatch: pytest.MonkeyPatch) -> None:

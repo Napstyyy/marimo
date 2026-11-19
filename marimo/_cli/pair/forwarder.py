@@ -1,6 +1,7 @@
 # Copyright 2026 Marimo. All rights reserved.
 from __future__ import annotations
 
+import functools
 import http.client
 import json
 import logging
@@ -268,6 +269,8 @@ def _read_stream(
         )
         responses.append(response)
         try:
+            if response.response.getheader(ATTACHMENT_HEADER) is None:
+                raise PairError("The server does not support agent messages.")
             if not stopped.is_set():
                 yield from iter_sse(response)
         finally:
@@ -286,16 +289,10 @@ def _wait_reconnect(inbox: Inbox, delay: float) -> bool:
     return False
 
 
-def _deliver(
-    config: ForwarderConfig,
-    inbox: Inbox,
-    pointer: PointerEvent,
-    key: str,
-    files: AgentMessageFiles,
-) -> None:
+def _messages_endpoint(
+    config: ForwarderConfig, pointer: PointerEvent, key: str
+) -> tuple[str, dict[str, str]]:
     from urllib.parse import quote
-
-    from marimo._cli.pair.delivery import Submission
 
     base = f"{host_api_url(config.url)}/notebooks/{quote(config.notebook, safe='')}/messages"
     headers = {
@@ -305,6 +302,15 @@ def _deliver(
     }
     if config.token:
         headers["Authorization"] = f"Bearer {config.token}"
+    return base, headers
+
+
+def _fetch(
+    config: ForwarderConfig, pointer: PointerEvent, key: str
+) -> MessageContent | None:
+    from urllib.parse import quote
+
+    base, headers = _messages_endpoint(config, pointer, key)
     try:
         response = open_response(
             method="POST",
@@ -314,27 +320,57 @@ def _deliver(
             read_timeout=5,
         )
         try:
-            content = msgspec.json.decode(
+            return msgspec.json.decode(
                 response.response.read(), type=MessageContent
             )
         finally:
             response.close()
-        message = inbox_message(
-            content.message,
-            notebook=content.notebook,
-            sender=content.sender,
-            budget=inbox.inbox_bytes,
-            files=files,
-        )
-        submission = inbox.send(message)
-    except SubmissionRejectedError as error:
-        submission = Submission("rejected", str(error), reason=error.reason)
     except Exception:
-        submission = Submission(
-            "unknown",
-            "The harness did not confirm submission.",
+        return None
+
+
+def _submit(
+    config: ForwarderConfig,
+    inbox: Inbox,
+    pointer: PointerEvent,
+    key: str,
+    content: MessageContent | None,
+    files: AgentMessageFiles,
+) -> None:
+    from marimo._cli.pair.delivery import Submission
+
+    base, headers = _messages_endpoint(config, pointer, key)
+    unknown = Submission(
+        "unknown",
+        "The harness did not confirm submission.",
+        reason="failed",
+    )
+    if content is None:
+        submission = unknown
+    else:
+        failure = Submission(
+            "rejected",
+            "The message could not be prepared for the harness.",
             reason="failed",
         )
+        try:
+            message = inbox_message(
+                content.message,
+                notebook=content.notebook,
+                sender=content.sender,
+                budget=inbox.inbox_bytes,
+                files=files,
+            )
+            # From here the harness can hold the message, so a retry can
+            # duplicate it.
+            failure = unknown
+            submission = inbox.send(message)
+        except SubmissionRejectedError as error:
+            submission = Submission(
+                "rejected", str(error), reason=error.reason
+            )
+        except Exception:
+            submission = failure
     report = SubmissionReport(
         pointer.attachment_id,
         pointer.attempt_id,
@@ -360,6 +396,35 @@ def run_forwarder(
 ) -> None:
     files = AgentMessageFiles()
     files.cleanup()
+    # The host allows a few seconds for each fetch, and a harness can take
+    # longer than that to accept one message. Submission runs apart from the
+    # stream so that one slow message does not expire the next.
+    submissions: queue.Queue[Callable[[], None] | None] = queue.Queue()
+
+    def submit_in_order() -> None:
+        while (submit := submissions.get()) is not None:
+            try:
+                submit()
+            except Exception:
+                _LOGGER.warning("Could not complete an agent message attempt.")
+
+    worker = threading.Thread(target=submit_in_order, daemon=True)
+    worker.start()
+    try:
+        _forward(config, inbox, files, submissions, ready=ready)
+    finally:
+        submissions.put(None)
+        worker.join()
+
+
+def _forward(
+    config: ForwarderConfig,
+    inbox: Inbox,
+    files: AgentMessageFiles,
+    submissions: queue.Queue[Callable[[], None] | None],
+    *,
+    ready: Callable[[], None],
+) -> None:
     check_at = time.monotonic()
     attached = False
     attachment: str | None = None
@@ -446,12 +511,17 @@ def run_forwarder(
                         )
                         key = response.response.getheader(REPORT_KEY_HEADER)
                         if pointer.attachment_id == own_attachment and key:
-                            try:
-                                _deliver(config, inbox, pointer, key, files)
-                            except PairError:
-                                _LOGGER.warning(
-                                    "Could not complete an agent message attempt."
+                            submissions.put(
+                                functools.partial(
+                                    _submit,
+                                    config,
+                                    inbox,
+                                    pointer,
+                                    key,
+                                    _fetch(config, pointer, key),
+                                    files,
                                 )
+                            )
                 if event.id is not None:
                     cursor = event.id
         finally:
