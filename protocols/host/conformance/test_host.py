@@ -320,7 +320,7 @@ async def finish_run(watch, run, key, outcome):
         lambda f: (
             f.event == "run"
             and f.message()["run"]["id"] == run["id"]
-            and f.message()["run"]["status"] == "completed"
+            and f.message()["run"]["state"]["status"] == "completed"
         )
     )
     executions = {}
@@ -335,7 +335,7 @@ async def finish_run(watch, run, key, outcome):
         e["status"] == "completed" and e["outcome"] is not None
         for e in executions.values()
     ), "run completed before its executions"
-    assert live(events[-1], key)["run"]["outcome"] == outcome
+    assert live(events[-1], key)["run"]["state"]["outcome"] == outcome
     return events, list(executions.values())
 
 
@@ -360,7 +360,7 @@ async def test_run(host, scratch, code, outcome, kind):
             202,
             "Run",
         )
-        assert run["status"] in ("queued", "running")
+        assert run["state"]["status"] in ("queued", "running")
         assert run["id"] != key
         events, executions = await finish_run(watch, run, key, outcome)
         assert run["origin"] == {"kind": "code", "code": code}
@@ -642,10 +642,10 @@ async def test_cancel_queued_run_leaves_other_runs_untouched(host, scratch):
             lambda f: (
                 f.event == "run"
                 and f.message()["run"]["id"] == queued["id"]
-                and f.message()["run"]["status"] == "completed"
+                and f.message()["run"]["state"]["status"] == "completed"
             )
         )
-        assert events[-1].message()["run"]["outcome"] == "interrupted"
+        assert events[-1].message()["run"]["state"]["outcome"] == "interrupted"
         # The queued run may leave an execution, but it never started.
         assert not any(
             e["run_id"] == queued["id"] and e["started_at"] is not None

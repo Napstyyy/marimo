@@ -58,7 +58,7 @@ def test_editor_input_replies_require_interact(
                 if event["event"] == "run":
                     run = event["data"]["run"]
                     if run["id"] == accepted.json()["id"]:
-                        assert run["status"] != "completed", run
+                        assert run["state"]["status"] != "completed", run
                 if event["event"] == "input":
                     pending = event["data"]["input"]
                     break
@@ -103,10 +103,10 @@ def test_editor_input_replies_require_interact(
                     run = event["data"]["run"]
                     if (
                         run["id"] == accepted.json()["id"]
-                        and run["status"] == "completed"
+                        and run["state"]["status"] == "completed"
                     ):
                         break
-            assert run["outcome"] == "succeeded"
+            assert run["state"]["outcome"] == "succeeded"
 
 
 @pytest.mark.parametrize("scratch", [False, True])
@@ -151,7 +151,7 @@ async def test_input_replies_and_retries(
                     > index
                     or any(
                         r.get("event") == "run"
-                        and r["data"]["run"]["status"] == "completed"
+                        and r["data"]["run"]["state"]["status"] == "completed"
                         for r in response.records
                     )
                 ),
@@ -199,7 +199,7 @@ async def test_input_replies_and_retries(
             events,
             lambda response: any(
                 record.get("event") == "run"
-                and record["data"]["run"]["status"] == "completed"
+                and record["data"]["run"]["state"]["status"] == "completed"
                 for record in response.records
             ),
         )
@@ -207,9 +207,9 @@ async def test_input_replies_and_retries(
             record["data"]["run"]
             for record in events.records
             if record.get("event") == "run"
-            and record["data"]["run"]["status"] == "completed"
+            and record["data"]["run"]["state"]["status"] == "completed"
         ]
-        assert run["outcome"] == "succeeded"
+        assert run["state"]["outcome"] == "succeeded"
         inputs = [
             record
             for record in events.records
@@ -267,7 +267,7 @@ async def test_interrupt_closes_prompt_and_rejects_late_reply(
             events,
             lambda response: any(
                 record.get("event") == "run"
-                and record["data"]["run"]["status"] == "completed"
+                and record["data"]["run"]["state"]["status"] == "completed"
                 for record in response.records
             ),
         )
