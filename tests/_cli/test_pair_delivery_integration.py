@@ -552,7 +552,7 @@ def test_pointer_delivery_is_private_and_targeted(
                 assert "report_key" not in event.data
                 if event.name == "custom":
                     pointer = json.loads(event.data)["custom"]
-                    assert pointer["type"] == "marimo.agents.pointer.v1"
+                    assert pointer["type"] == "marimo._agents.pointer.v1"
                     assert set(pointer["data"]) == {
                         "message_id",
                         "attempt_id",
@@ -982,19 +982,19 @@ def test_blocking_agents_from_cell_and_widget(notebook_client) -> None:
     with ExitStack() as stack:
         initial = execute(
             "import marimo as mo, msgspec\n"
-            "print(mo.agents.available())\n"
-            "print(mo.agents.list())\n"
-            "print(mo.agents.broadcast(None).recipients)\n"
-            "print(mo.agents.send(None, to='absent').recipients[0].reason)"
+            "print(mo._agents.available())\n"
+            "print(mo._agents.list())\n"
+            "print(mo._agents.broadcast(None).recipients)\n"
+            "print(mo._agents.send(None, to='absent').recipients[0].reason)"
         )
         assert initial == "True\n()\n()\nnot-connected\n"
         stack.enter_context(running_forwarder(server, inbox))
         output = execute(
-            "print(mo.agents.available())\n"
-            "print([(a.id, a.name) for a in mo.agents.list()])\n"
-            "print(msgspec.json.encode(mo.agents.send({'from': 'cell'}, to='agent', sender='Lens')).decode())\n"
+            "print(mo._agents.available())\n"
+            "print([(a.id, a.name) for a in mo._agents.list()])\n"
+            "print(msgspec.json.encode(mo._agents.send({'from': 'cell'}, to='agent', sender='Lens')).decode())\n"
             "results = []\n"
-            "button = mo.ui.button(on_change=lambda _: results.append(mo.agents.broadcast({'from': 'widget'}, sender='Lens')))\n"
+            "button = mo.ui.button(on_change=lambda _: results.append(mo._agents.broadcast({'from': 'widget'}, sender='Lens')))\n"
             "print(button._id)"
         ).splitlines()
         assert output[:2] == ["True", "[('agent', 'Test')]"]
@@ -1124,9 +1124,9 @@ def test_future_agents_from_cell_and_widget(
     with running_forwarder(server, inbox):
         try:
             call = (
-                "mo.agents.start_broadcast"
+                "mo._agents.start_broadcast"
                 if broadcast
-                else "mo.agents.start_send"
+                else "mo._agents.start_send"
             )
             args = "" if broadcast else ", to='agent'"
             output = execute(
@@ -1134,7 +1134,7 @@ def test_future_agents_from_cell_and_widget(
                 "done = threading.Event()\n"
                 "results = []\n"
                 "def on_done(f):\n"
-                "    results.append((f.result(), mo.current_thread().name, mo.agents.available()))\n"
+                "    results.append((f.result(), mo.current_thread().name, mo._agents.available()))\n"
                 "    if len(results) == 2:\n"
                 "        done.set()\n"
                 f"future = {call}({{'from': 'cell'}}, sender='Lens'{args})\n"
@@ -1167,7 +1167,7 @@ def test_future_agents_from_cell_and_widget(
                     "assert list(concurrent.futures.as_completed([future, *widget_futures], timeout=10))\n"
                     "assert any(r[0] == future.result() for r in results)\n"
                     "assert all(r[2] for r in results)\n"
-                    "assert widget_futures[0].result().recipients == mo.agents.send(None, to='agent').recipients\n"
+                    "assert widget_futures[0].result().recipients == mo._agents.send(None, to='agent').recipients\n"
                     "print(msgspec.json.encode(future.result()).decode())"
                 )
             )
@@ -1195,7 +1195,7 @@ def test_future_send_loop_bounds_threads(notebook_client) -> None:
             assert (
                 execute(
                     "import marimo as mo, threading, concurrent.futures\n"
-                    "loop_futures = [mo.agents.start_send(i, to='agent') for i in range(100)]\n"
+                    "loop_futures = [mo._agents.start_send(i, to='agent') for i in range(100)]\n"
                     "print(sum(t.name == 'marimo-agent-send' for t in threading.enumerate()) <= 5)\n"
                     "print(sum(not f.running() and not f.done() for f in loop_futures) >= 96)\n"
                     "print(len({f.message_id for f in loop_futures}))\n"
