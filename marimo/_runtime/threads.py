@@ -74,6 +74,9 @@ class Thread(threading.Thread):
         ```
     """
 
+    # Whether invalidation of the spawning cell signals this thread to exit.
+    _cell_owned = True
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._run_id = RUN_ID_CTX.get(None)
@@ -97,7 +100,8 @@ class Thread(threading.Thread):
                 return True
 
         ctx = get_context()
-        ctx.cell_lifecycle_registry.add(ThreadLifecycle())
+        if self._cell_owned:
+            ctx.cell_lifecycle_registry.add(ThreadLifecycle())
 
         if isinstance(ctx, KernelRuntimeContext):
             # Patch `print` lazily, only once a mo.Thread exists, to route
