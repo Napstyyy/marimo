@@ -138,7 +138,7 @@ def serialize_session_view(
     cell_ids: Iterable[CellId_t],
     *,
     drop_virtual_file_outputs: bool,
-    include_callback_output: bool = False,
+    for_display: bool = False,
     script_metadata_hash: str | None = None,
 ) -> NotebookSessionV1:
     """Convert a SessionView to a NotebookSession schema.
@@ -148,8 +148,8 @@ def serialize_session_view(
     schema). When not provided, this method attempts to recover the notebook
     order from the SessionView object, but this is not always possible.
 
-    Rendered exports include callback output. The execution cache omits it
-    because a restored console belongs to a cell execution.
+    Rendered exports include the displayed value and callback writes. Execution
+    caches only include output belonging to the current execution.
 
     `./@file/...` URLs are backed by per-process buffers, so
     `drop_virtual_file_outputs` depends on where the snapshot will be
@@ -170,7 +170,7 @@ def serialize_session_view(
     for cell_id in cell_ids:
         cell_notif = view.cell_notifications.get(cell_id)
         cell_console = view.cell_console(
-            cell_id, include_callbacks=include_callback_output
+            cell_id, include_callbacks=for_display
         )
         if cell_notif is None and not cell_console:
             # We haven't seen any outputs or notifications for this cell.
@@ -181,7 +181,11 @@ def serialize_session_view(
         outputs: list[OutputType] = []
         console: list[ConsoleType] = []
 
-        cell_output = cell_notif.output if cell_notif is not None else None
+        cell_output = (
+            cell_notif.output
+            if for_display and cell_notif is not None
+            else view.current_execution_output(cell_id)
+        )
         if cell_output:
             if cell_output.channel == CellChannel.MARIMO_ERROR:
                 for error in cast(

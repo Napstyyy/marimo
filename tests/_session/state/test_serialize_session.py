@@ -19,6 +19,7 @@ from marimo._messaging.notebook.document import NotebookCell, NotebookDocument
 from marimo._messaging.notification import (
     CallbackOutputNotification,
     CellNotification,
+    ExecutionNotification,
     PdbOutputNotification,
     StartupProgressNotification,
 )
@@ -296,7 +297,7 @@ def test_export_orders_execution_and_callback_writes_before_merging(
         saved = serialize_session_view(
             session_view,
             [CELL1],
-            include_callback_output=include_callbacks,
+            for_display=include_callbacks,
             drop_virtual_file_outputs=False,
         )
         assert [row["text"] for row in saved["cells"][0]["console"]] == [
@@ -322,6 +323,40 @@ def test_export_keeps_callback_between_writes_with_the_same_timestamp(
     ] == ["ABC"]
 
 
+def test_previous_display_is_exported_but_not_cached_for_a_rerun(
+    session_view: SessionView,
+) -> None:
+    session_view.add_notification(
+        CellNotification(
+            CELL1,
+            output=CellOutput(
+                CellChannel.OUTPUT, "text/plain", "first result"
+            ),
+        )
+    )
+    session_view.add_notification(
+        ExecutionNotification("second", CELL1, "run", "planned")
+    )
+    session_view.add_notification(
+        CellNotification(
+            CELL1, execution_id="second", console=CellOutput.stdout("running")
+        )
+    )
+    for for_display in (True, False):
+        [cell] = serialize_session_view(
+            session_view,
+            [CELL1],
+            for_display=for_display,
+            drop_virtual_file_outputs=False,
+        )["cells"]
+        assert cell["outputs"] == (
+            [{"type": "data", "data": {"text/plain": "first result"}}]
+            if for_display
+            else []
+        )
+        assert [entry["text"] for entry in cell["console"]] == ["running"]
+
+
 def test_export_retains_callbacks_and_excludes_debugger_output(
     session_view: SessionView,
 ) -> None:
@@ -341,7 +376,7 @@ def test_export_retains_callbacks_and_excludes_debugger_output(
     export = serialize_session_view(
         session_view,
         [CELL1],
-        include_callback_output=True,
+        for_display=True,
         drop_virtual_file_outputs=False,
     )
     assert export["cells"] == [

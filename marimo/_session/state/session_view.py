@@ -197,6 +197,7 @@ class SessionView:
         # A mapping from cell (IDs) to their last seen notification
         self.cell_notifications: dict[CellId_t, CellNotification] = {}
         self._planned_executions: dict[CellId_t, str] = {}
+        self._cells_showing_previous_output: set[CellId_t] = set()
         self._cleared_inputs: dict[
             CellId_t, ConsoleInputsClearedNotification
         ] = {}
@@ -366,6 +367,15 @@ class SessionView:
             ):
                 self._clear_console_inputs(
                     notification.cell_id, notification.execution_id, previous
+                )
+            if notification.output is not None:
+                self._cells_showing_previous_output.discard(
+                    notification.cell_id
+                )
+            elif notification.cell_id in self._cells_showing_previous_output:
+                # The merged status and displayed value have different owners.
+                notification = msgspec.structs.replace(
+                    notification, run_id=None, execution_id=None
                 )
             self.cell_notifications[notification.cell_id] = (
                 merge_cell_notification(previous, notification)
@@ -642,10 +652,15 @@ class SessionView:
             self._console_positions[cell_id] = -1
             self._cleared_inputs.pop(cell_id, None)
             if cell is not None:
+                if cell.output is not None:
+                    self._cells_showing_previous_output.add(cell_id)
                 self.cell_notifications[cell_id] = msgspec.structs.replace(
                     cell,
-                    execution_id=notification.execution_id,
-                    output=None,
+                    execution_id=(
+                        cell.execution_id
+                        if cell.output is not None
+                        else notification.execution_id
+                    ),
                     console=None,
                 )
         elif (
@@ -682,6 +697,13 @@ class SessionView:
 
     def current_execution_id(self, cell_id: CellId_t) -> str | None:
         return self._planned_executions.get(cell_id)
+
+    def current_execution_output(self, cell_id: CellId_t) -> CellOutput | None:
+        """Return only output produced by the current execution."""
+        cell = self.cell_notifications.get(cell_id)
+        if cell is None or cell_id in self._cells_showing_previous_output:
+            return None
+        return cell.output
 
     def cleared_console_inputs(
         self, cell_id: CellId_t, execution_id: str | None = None
