@@ -513,7 +513,7 @@ class Notebook:
                 id=mint(protocol.RunId, "run"),
                 notebook_id=self.id,
                 runtime_id=runtime.id,
-                origin=protocol.CodeOrigin()
+                origin=protocol.CodeOrigin(code=code)
                 if code is not None
                 else protocol.CellsOrigin(cell_ids=tuple(targets)),
                 status="queued",
