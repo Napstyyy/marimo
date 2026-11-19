@@ -5953,7 +5953,7 @@ export interface components {
     MarimoExceptionRaisedError: {
       exception_type: string;
       /** @default false */
-      is_internal?: boolean;
+      is_marimo_bug?: boolean;
       msg: string;
       raising_cell: components["schemas"]["CellId"] | null;
       /** @default null */

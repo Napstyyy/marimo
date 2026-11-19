@@ -298,13 +298,13 @@ describe("readExport", () => {
 
     it.each([undefined, false, true])(
       "restores error classification %s from the session",
-      (isInternal) => {
+      (isMarimoBug) => {
         const errorOutput = {
           type: "error" as const,
           ename: "ValueError",
           evalue: "Something went wrong",
           traceback: ["Traceback line 1"],
-          ...(isInternal === undefined ? {} : { is_internal: isInternal }),
+          ...(isMarimoBug === undefined ? {} : { is_marimo_bug: isMarimoBug }),
         };
         const session = createSession([
           createSessionCell("cell-1", [errorOutput]),
@@ -319,7 +319,7 @@ describe("readExport", () => {
         expect(result.snapshot?.results[0]?.outcome).toEqual({
           kind: "error",
           error: expect.objectContaining({
-            kind: isInternal ? "internal-exception" : "exception",
+            kind: isMarimoBug ? "marimo-bug" : "exception",
             source: "marimo",
             name: "ValueError",
             message: "Something went wrong",
